@@ -3,16 +3,87 @@ syntax = "proto3";
 package com.project.ratatoskr;
 
 option java_package = "com.project.ratatoskr";
-
 option java_multiple_files = true;
+option go_package = "github.com/Vancheszz/android-agent/internal/ratatoskr";
 
-message ScreenDump {
+// Главный сервис управления Android-инстансом
+service Ratatoskr {
+
+  // 1. Получить текущее состояние: XML дерево + Скриншот (опционально)
+  rpc GetScreenState (ScreenRequest) returns (ScreenState);
+
+  // 2. Выполнить действие
+  rpc PerformAction (ActionRequest) returns (ActionResponse);
+
+  // 3. Стрим событий (для real-time мониторинга)
+  rpc StreamFrames (StreamRequest) returns (stream Frame);
+}
+
+// ============================================================
+// Запросы
+// ============================================================
+
+message ScreenRequest {
+  bool include_screenshot = 1;        // Нужно ли прикреплять картинку
+  float compression_quality = 2;      // 0.0 - 1.0 (для JPEG)
+  bool include_visible_only = 3;      // Только видимые ноды (опционально)
+}
+
+message ActionRequest {
+  enum ActionType {
+    CLICK = 0;
+    SWIPE = 1;
+    TYPE_TEXT = 2;
+    KEY_EVENT = 3;
+    GET_DUMP = 4;                      // Просто получить свежий дамп
+  }
+
+  enum KeyCode {
+    UNKNOWN = 0;
+    BACK = 1;
+    HOME = 2;
+    ENTER = 3;
+    DELETE = 4;
+    VOLUME_UP = 5;
+    VOLUME_DOWN = 6;
+  }
+
+  ActionType type = 1;
+
+  // Для CLICK
+  int32 x = 2;
+  int32 y = 3;
+
+  // Для SWIPE
+  int32 end_x = 4;
+  int32 end_y = 5;
+  int32 duration_ms = 8;               // Длительность свайпа в мс
+
+  // Для TYPE_TEXT
+  string text = 6;
+
+  // Для KEY_EVENT
+  KeyCode key_code = 7;
+}
+
+message StreamRequest {
+  int32 fps_limit = 1;                 // Ограничение FPS (0 = без ограничений)
+  Rect crop_area = 2;                  // Стримить только область (экономия трафика)
+  float compression_quality = 3;       // Качество JPEG (0.0 - 1.0)
+}
+
+// ============================================================
+// Ответы
+// ============================================================
+
+message ScreenState {
   string package_name = 1;
-  int64 timestamp = 2;
-  int32 width = 3;
-  int32 height = 4;
+  int64 timestamp = 2;                 // Unix timestamp (мс)
+  int32 screen_width = 3;
+  int32 screen_height = 4;
   repeated UiNode nodes = 5;
-
+  bytes screenshot = 6;                // JPEG/PNG данные
+  string screenshot_format = 7;        // "jpeg", "png", "raw"
 }
 
 message UiNode {
@@ -22,23 +93,28 @@ message UiNode {
   string resource_id = 4;
   string class_name = 5;
   bool is_clickable = 6;
-  Rect bounds = 7;
+  bool is_visible = 7;
+  Rect bounds = 8;
+  string content_description = 9;      // Accessibility описание (полезно)
 }
 
 message Rect {
   int32 left = 1;
-  int32 right = 2;
-  int32 top = 3;
+  int32 top = 2;
+  int32 right = 3;
   int32 bottom = 4;
 }
 
-message AgentCMD {
-  enum CMDType{
-    CLICK = 0;
-    TYPE_TEXT = 1;
-    GET_DUMP = 2;
-  }
-  CMDType type = 1;
-  string target_id = 2;
-  string payload = 3;
+message Frame {
+  bytes data = 1;                      // Кадр (JPEG)
+  int64 timestamp = 2;                 // Unix timestamp (мс)
+  int32 width = 3;                     // Ширина кадра
+  int32 height = 4;                    // Высота кадра
+}
+
+message ActionResponse {
+  bool success = 1;
+  string error_message = 2;
+  int32 wait_after_ms = 3;             // Рекомендованная задержка (для анимаций)
+  ScreenState after_state = 4;         // Опционально: состояние после действия
 }

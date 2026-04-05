@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+import com.google.protobuf.gradle.*
 
 plugins {
     alias(libs.plugins.android.application)
@@ -46,6 +47,13 @@ android {
     kotlin {
         jvmToolchain(17)
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/INDEX.LIST"
+            excludes += "/META-INF/io.netty.versions.properties"
+        }
+    }
 }
 
 java {
@@ -64,13 +72,29 @@ protobuf {
     protoc {
         artifact = libs.protobuf.protoc.get().toString()
     }
+    plugins {
+        id("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+        }
+        id("grpckt") {
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:${libs.versions.grpcKotlin.get()}:jdk8@jar"
+        }
+    }
     generateProtoTasks {
         all().forEach { task ->
-            task.builtins {
-                create("java") {
+            task.plugins {
+                id("grpc") {
                     option("lite")
                 }
-                create("kotlin") {
+                id("grpckt") {
+                    option("lite")
+                }
+            }
+            task.builtins {
+                id("java") {
+                    option("lite")
+                }
+                id("kotlin") {
                     option("lite")
                 }
             }
@@ -82,7 +106,14 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    
+    // Protobuf & gRPC
     implementation(libs.protobuf.kotlin.lite)
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.netty)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.grpc.kotlin.stub)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
