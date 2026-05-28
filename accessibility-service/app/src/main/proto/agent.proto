@@ -6,17 +6,18 @@ option java_package = "com.project.ratatoskr";
 option java_multiple_files = true;
 option go_package = "github.com/Vancheszz/android-agent/internal/ratatoskr";
 
-// Главный сервис управления Android-инстансом
 service Ratatoskr {
-
-  // 1. Получить текущее состояние: XML дерево + Скриншот (опционально)
+  // 1. Состояние экрана (поддержка диффов и стабильности)
   rpc GetScreenState (ScreenRequest) returns (ScreenState);
 
-  // 2. Выполнить действие
+  // 2. Действия (с ожиданием завершения и стабилизации)
   rpc PerformAction (ActionRequest) returns (ActionResponse);
 
-  // 3. Стрим событий (для real-time мониторинга)
+  // 3. Стрим кадров (адаптивный FPS)
   rpc StreamFrames (StreamRequest) returns (stream Frame);
+
+  // 4. Стрим событий UI
+  rpc StreamEvents (EventRequest) returns (stream UiEvent);
 }
 
 // ============================================================
@@ -24,9 +25,14 @@ service Ratatoskr {
 // ============================================================
 
 message ScreenRequest {
-  bool include_screenshot = 1;        // Нужно ли прикреплять картинку
-  float compression_quality = 2;      // 0.0 - 1.0 (для JPEG)
-  bool include_visible_only = 3;      // Только видимые ноды (опционально)
+  bool include_screenshot = 1;
+  float compression_quality = 2;
+  bool include_visible_only = 3;
+  string last_screen_hash = 4;        // Для инкрементальных обновлений
+}
+
+message EventRequest {
+  bool include_nodes = 1;
 }
 
 message ActionRequest {
@@ -35,7 +41,9 @@ message ActionRequest {
     SWIPE = 1;
     TYPE_TEXT = 2;
     KEY_EVENT = 3;
-    GET_DUMP = 4;                      // Просто получить свежий дамп
+    SCROLL = 4;
+    LONG_CLICK = 5;
+    WAIT_FOR_STABLE = 6;              // Явное ожидание стабилизации
   }
 
   enum KeyCode {
@@ -46,30 +54,25 @@ message ActionRequest {
     DELETE = 4;
     VOLUME_UP = 5;
     VOLUME_DOWN = 6;
+    RECENTS = 7;
   }
 
   ActionType type = 1;
-
-  // Для CLICK
   int32 x = 2;
   int32 y = 3;
-
-  // Для SWIPE
   int32 end_x = 4;
   int32 end_y = 5;
-  int32 duration_ms = 8;               // Длительность свайпа в мс
-
-  // Для TYPE_TEXT
+  int32 duration_ms = 8;
   string text = 6;
-
-  // Для KEY_EVENT
   KeyCode key_code = 7;
+  string node_stable_id = 9;          // Действие через стабильный ID
+  bool wait_for_stabilization = 10;   // Ждать ли затишья после действия
 }
 
 message StreamRequest {
-  int32 fps_limit = 1;                 // Ограничение FPS (0 = без ограничений)
-  Rect crop_area = 2;                  // Стримить только область (экономия трафика)
-  float compression_quality = 3;       // Качество JPEG (0.0 - 1.0)
+  int32 fps_limit = 1;
+  Rect crop_area = 2;
+  float compression_quality = 3;
 }
 
 // ============================================================
@@ -78,24 +81,54 @@ message StreamRequest {
 
 message ScreenState {
   string package_name = 1;
-  int64 timestamp = 2;                 // Unix timestamp (мс)
+  string activity_name = 8;
+  int64 timestamp = 2;
   int32 screen_width = 3;
   int32 screen_height = 4;
-  repeated UiNode nodes = 5;
-  bytes screenshot = 6;                // JPEG/PNG данные
-  string screenshot_format = 7;        // "jpeg", "png", "raw"
+
+  repeated UiNode nodes = 5;           // Полное дерево или измененные ноды
+  repeated string removed_node_ids = 10;
+
+  bytes screenshot = 6;
+  string screenshot_format = 7;
+  string screen_hash = 11;
+  bool is_stable = 12;                 // UI не меняется
+  bool is_incremental = 13;            // Это дельта или полный слепок
+
+  repeated WindowInfo windows = 14;    // Информация о слоях (окнах)
+  int64 screen_generation = 15;        // Счетчик обновлений UI
+}
+
+message WindowInfo {
+  int32 id = 1;
+  int32 type = 2;                      // TYPE_APPLICATION, TYPE_SYSTEM...
+  int32 layer = 3;                     // Z-index
+  bool is_focused = 4;
+  Rect bounds = 5;
+  string title = 6;
 }
 
 message UiNode {
-  int32 id = 1;
-  int32 parent_id = 2;
+  string stable_id = 1;                // Детерминированный ID
+  string parent_stable_id = 2;
+  int32 window_id = 15;                // К какому окну относится
+
   string text = 3;
   string resource_id = 4;
   string class_name = 5;
+  string content_description = 9;
+  string hint = 10;
+
   bool is_clickable = 6;
   bool is_visible = 7;
+  bool is_scrollable = 12;
+  bool is_focused = 13;
+  bool is_editable = 14;
+  bool is_password = 16;
+  bool is_selected = 17;
+  bool is_checked = 18;
+
   Rect bounds = 8;
-  string content_description = 9;      // Accessibility описание (полезно)
 }
 
 message Rect {
@@ -106,15 +139,34 @@ message Rect {
 }
 
 message Frame {
-  bytes data = 1;                      // Кадр (JPEG)
-  int64 timestamp = 2;                 // Unix timestamp (мс)
-  int32 width = 3;                     // Ширина кадра
-  int32 height = 4;                    // Высота кадра
+  bytes data = 1;
+  int64 timestamp = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message UiEvent {
+  enum EventType {
+    UNKNOWN = 0;
+    SCREEN_CHANGED = 1;
+    WINDOW_STATE_CHANGED = 2;
+    SCROLLED = 3;
+    TEXT_CHANGED = 4;
+    NOTIFICATION = 5;
+    UI_STABILIZED = 6;
+  }
+
+  EventType type = 1;
+  int64 timestamp = 2;
+  string package_name = 3;
+  string class_name = 5;
+  string screen_hash = 6;
+  int64 screen_generation = 7;
 }
 
 message ActionResponse {
   bool success = 1;
   string error_message = 2;
-  int32 wait_after_ms = 3;             // Рекомендованная задержка (для анимаций)
-  ScreenState after_state = 4;         // Опционально: состояние после действия
+  int32 wait_after_ms = 3;
+  string result_screen_hash = 4;
 }
