@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package aggregator;
+
+// Важно для Go, чтобы пути генерации были относительными
+option go_package = "./pb";
+
+service PhoneUiService {
+  // Метод, который Scanner будет вызывать по сети
+  rpc GetRawMenuDump(MenuRequest) returns (MenuResponse);
+}
+
+message MenuRequest {
+  string provider = 1; // "kfc" или "mac"
+}
+
+message MenuResponse {
+  string raw_xml = 1; // Огромная сырая XML-строка, снятая с экрана телефона
+}
