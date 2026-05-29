@@ -1,4 +1,0 @@
-<resources>
-    <string name="app_name">accessibility-service</string>
-    <string name="accessibility_service_description">Рататоск: Агент сбора данных экрана</string>
-</resources>

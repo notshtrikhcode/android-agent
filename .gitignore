@@ -1,6 +1,0 @@
-.gradle/
-build/
-accessibility-service/app/build/
-accessibility-service/.gradle/
-accessibility-service/local.properties
-*.apk
